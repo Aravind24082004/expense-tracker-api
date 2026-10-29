@@ -46,6 +46,11 @@ function dataRows(body) {
   return body.split('\n').slice(1, -1);
 }
 
+async function addExpense(expense) {
+  const res = await request('POST', '/expenses', expense);
+  assert.strictEqual(res.status, 201, JSON.stringify(res.body));
+}
+
 test('GET /expenses/export.csv returns September as CSV, header first, sorted by date', async () => {
   const res = await request('GET', '/expenses/export.csv?from=2026-09-01&to=2026-09-30');
   assert.strictEqual(res.status, 200);
@@ -73,8 +78,8 @@ test('GET /expenses/export.csv quotes a note with a comma and leaves plain notes
 });
 
 test('GET /expenses/export.csv doubles quotes and quotes newlines in notes', async () => {
-  await request('POST', '/expenses', { date: '2026-11-02', amount: 40, category: 'food', note: 'Chai "special"' });
-  await request('POST', '/expenses', { date: '2026-11-03', amount: 60, category: 'food', note: 'line one\nline two' });
+  await addExpense({ date: '2026-11-02', amount: 40, category: 'food', note: 'Chai "special"' });
+  await addExpense({ date: '2026-11-03', amount: 60, category: 'food', note: 'line one\nline two' });
 
   const res = await request('GET', '/expenses/export.csv?from=2026-11-01&to=2026-11-30');
   assert.strictEqual(res.status, 200);
@@ -82,9 +87,16 @@ test('GET /expenses/export.csv doubles quotes and quotes newlines in notes', asy
   assert.ok(res.body.includes('2026-11-03,food,60,"line one\nline two"\n'));
 });
 
+test('GET /expenses/export.csv quotes a category with a comma', async () => {
+  await addExpense({ date: '2027-01-05', amount: 80, category: 'food, misc', note: 'Snacks' });
+
+  const res = await request('GET', '/expenses/export.csv?from=2027-01-01&to=2027-01-31');
+  assert.deepStrictEqual(dataRows(res.body), ['2027-01-05,"food, misc",80,Snacks']);
+});
+
 test('GET /expenses/export.csv orders by date, not by file order', async () => {
-  await request('POST', '/expenses', { date: '2026-12-20', amount: 100, category: 'food', note: 'Later' });
-  await request('POST', '/expenses', { date: '2026-12-10', amount: 100, category: 'food', note: 'Earlier' });
+  await addExpense({ date: '2026-12-20', amount: 100, category: 'food', note: 'Later' });
+  await addExpense({ date: '2026-12-10', amount: 100, category: 'food', note: 'Earlier' });
 
   const res = await request('GET', '/expenses/export.csv?from=2026-12-01&to=2026-12-31');
   assert.deepStrictEqual(dataRows(res.body), ['2026-12-10,food,100,Earlier', '2026-12-20,food,100,Later']);
@@ -108,20 +120,22 @@ test('GET /expenses/export.csv returns only the header for an empty range', asyn
 });
 
 test('GET /expenses/export.csv rejects missing, invalid or reversed dates with 400', async () => {
+  const badFrom = 'from must be YYYY-MM-DD';
+  const badTo = 'to must be YYYY-MM-DD';
   const cases = [
-    '',
-    '?to=2026-09-30',
-    '?from=2026-09-01',
-    '?from=2026-9-1&to=2026-09-30',
-    '?from=2026-02-30&to=2026-03-01',
-    '?from=2026-13-01&to=2026-13-31',
-    '?from=2026-09-01&from=2026-09-02&to=2026-09-30',
-    '?from=2026-09-01&to=Sept',
-    '?from=2026-09-30&to=2026-09-01',
+    ['', badFrom],
+    ['?to=2026-09-30', badFrom],
+    ['?from=2026-09-01', badTo],
+    ['?from=2026-9-1&to=2026-09-30', badFrom],
+    ['?from=2026-02-30&to=2026-03-01', badFrom],
+    ['?from=2026-09-01&to=2026-13-01', badTo],
+    ['?from=2026-09-01&from=2026-09-02&to=2026-09-30', badFrom],
+    ['?from=2026-09-01&to=Sept', badTo],
+    ['?from=2026-09-30&to=2026-09-01', 'from must not be after to'],
   ];
-  for (const q of cases) {
+  for (const [q, error] of cases) {
     const res = await request('GET', '/expenses/export.csv' + q);
     assert.strictEqual(res.status, 400, q);
-    assert.ok(typeof res.body.error === 'string' && res.body.error.length > 0, q);
+    assert.deepStrictEqual(res.body, { error }, q);
   }
 });

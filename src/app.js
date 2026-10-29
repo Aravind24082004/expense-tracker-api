@@ -66,8 +66,9 @@ app.post('/expenses', (req, res) => {
   res.status(201).json(row);
 });
 
-// Quote a note that holds a comma, quote or newline; double any quotes inside it
-function csvNote(s) {
+// Quote a field that holds a comma, quote or newline; double any quotes inside it
+function csvField(value) {
+  const s = String(value);
   return /[",\r\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
 }
 
@@ -82,7 +83,10 @@ app.get('/expenses/export.csv', (req, res) => {
     .readAll()
     .filter((r) => r.date >= from && r.date <= to)
     .sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
-  const lines = ['date,category,amount,note', ...rows.map((r) => [r.date, r.category, r.amount, csvNote(r.note || '')].join(','))];
+  const lines = [
+    'date,category,amount,note',
+    ...rows.map((r) => [r.date, r.category, r.amount, r.note ?? ''].map(csvField).join(',')),
+  ];
 
   res.set('Content-Type', 'text/csv; charset=utf-8');
   res.set('Content-Disposition', `attachment; filename="expenses-${from}-${to}.csv"`);
